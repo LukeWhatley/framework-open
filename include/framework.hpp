@@ -7,6 +7,7 @@
 #include <memory>
 #include <exception>
 #include <stdexcept>
+#include <cstdint>
 
 #include "robinhood/robin_map.h"
 #include "nlohmann/json.hpp"
@@ -82,7 +83,7 @@ public:
 
 /* Use Hash Tables for storing a sparse collection of nodes / edges */
 typedef tsl::robin_map<uint32_t, unique_ptr<Node>, int_hash> NodeMap;
-typedef tsl::robin_map<Coords, unique_ptr<Edge>, coord_hash> EdgeMap;
+typedef tsl::robin_map<Coords, vector<unique_ptr<Edge>>, coord_hash> EdgeMap;
 
 /* TMP + Perfect Forwarding for C++11 // built into C++14 */
 template<typename T, typename... Args>
@@ -259,7 +260,7 @@ public:
 
     /* Constructors, assignment overleads, etc. */
 
-    Edge(Node *f, Node *t, Network *n = nullptr) : from(f), to(t), net(n) {}
+    Edge(Node *f, Node *t, Network *n = nullptr) : from(f), to(t), net(n), id(0) {}
     Edge(const Edge &e) = delete;
     Edge(Edge &&e) = delete;
     Edge& operator=(const Edge &n) = delete;
@@ -271,6 +272,7 @@ public:
     Node* from;                         /**< The node that the edge is coming from. */
     Node* to;                           /**< The node that the edge is going to. */
     const Network *net;                 /**< Pointer to the network that contains the node. */
+    uint64_t id;                        /**< The id of the edge. */
     vector<double> values;              /**< Values defined by the PropertyPack */
     json as_json() const;               /**< Turn it into a json object */
     vector <double> control_point;      /**< Optional. Bezier control point(s) for displaying. */
@@ -339,11 +341,16 @@ public:
     void remove_node(uint32_t idx, bool force = false);  /**< Delete node - if force=false, error on IO nodes. */
     void rename_node(uint32_t old_name, uint32_t new_name); /**< Change node's id */
 
-    Edge* add_edge(uint32_t fr, uint32_t to);            /**< Analogous to add_node() */
-    bool is_edge(uint32_t fr, uint32_t to) const;        /**< Analogous to is_node() */
-    Edge* get_edge(uint32_t fr, uint32_t to) const;      /**< Analogous to get_node() */
-    Edge* add_or_get_edge(uint32_t fr, uint32_t to);     /**< Analogous to add_or_get_node() */
-    void remove_edge(uint32_t fr, uint32_t to);          /**< Analogous to remove_node() */
+    Edge* add_edge(uint32_t fr, uint32_t to);                         /**< Analogous to add_node() */
+    Edge* add_edge(uint32_t fr, uint32_t to, uint64_t id);             /**< Add edge with innovation id */
+    bool is_edge(uint32_t fr, uint32_t to) const;                     /**< Analogous to is_node() */
+    bool is_edge(uint32_t fr, uint32_t to, uint64_t id) const;         /**< Does edge with id exist? */
+    Edge* get_edge(uint32_t fr, uint32_t to) const;                   /**< Analogous to get_node() */
+    Edge* get_edge(uint32_t fr, uint32_t to, uint64_t id) const;       /**< Return edge with id */
+    Edge* add_or_get_edge(uint32_t fr, uint32_t to);                  /**< Analogous to add_or_get_node() */
+    Edge* add_or_get_edge(uint32_t fr, uint32_t to, uint64_t id);      /**< Add/get edge with id */
+    void remove_edge(uint32_t fr, uint32_t to);                       /**< Analogous to remove_node() */
+    void remove_edge(uint32_t fr, uint32_t to, uint64_t id);           /**< Remove edge with id */
 
     /* Input and output nodes */
 

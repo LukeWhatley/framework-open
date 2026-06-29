@@ -4,6 +4,8 @@
 #include "utils/json_helpers.hpp"
 #include <cmath>
 #include <iostream>
+#include <iterator>
+#include <set>
 
 typedef std::runtime_error SRE;
 
@@ -48,6 +50,23 @@ static json edge_specs = {
 static const vector<string> required_edge_keys { "from", "to", "values" };
 
 static bool node_comp(Node *n1, Node *n2) { return (n1->id < n2->id); }
+
+static bool edge_id_exists(const EdgeMap &edges, uint64_t id)
+{
+  for(auto &bucket : edges)
+    for(auto &edge : bucket.second)
+      if(edge->id == id) return true;
+  return false;
+}
+
+static uint64_t next_edge_id(const EdgeMap &edges)
+{
+  uint64_t next_id = 0;
+  for(auto &bucket : edges)
+    for(auto &edge : bucket.second)
+      if(edge->id >= next_id) next_id = edge->id + 1;
+  return next_id;
+}
 
 void Node::set(int idx, double val)
 {
@@ -110,6 +129,7 @@ json Edge::as_json() const
   json rv;
 
   rv = json::object();
+  rv["id"] = id;
   rv["from"] = from->id;
   rv["to"] = to->id;
   rv["values"] = (values.size() == 0) ? json::array() : (json) values;
@@ -206,14 +226,21 @@ bool Network::operator==(const Network &rhs) const
     // matching edges
     for(auto &e : m_edges)
     {
-        if(!rhs.is_edge(e.first.first, e.first.second)) return false;
+      auto rhs_edges = rhs.m_edges.find(e.first);
+      if(rhs_edges == rhs.m_edges.end()) return false;
+      if(e.second.size() != rhs_edges->second.size()) return false;
 
-        Edge *e1 = e.second.get();
-        Edge *e2 = rhs.get_edge(e.first.first, e.first.second);
+      for(size_t i = 0; i < e.second.size(); i++)
+      {
+        Edge *e1 = e.second[i].get();
+        Edge *e2 = rhs_edges->second[i].get();
 
+        if(e1->id != e2->id) return false;
         if(e1->from->id != e2->from->id) return false;
         if(e1->to->id != e2->to->id) return false;
         if(e1->values != e2->values) return false;
+        if(e1->control_point != e2->control_point) return false;
+      }
     }
 
     if (m_associated_data != rhs.m_associated_data) return false;
@@ -239,12 +266,16 @@ void Network::copy_from(const Network& net)
     // Copy edges
     for(auto& e : net.m_edges)
     {
-        Edge *edge = add_edge(e.first.first, e.first.second);
+      for(auto& src_edge : e.second)
+      {
+        Edge *edge = add_edge(e.first.first, e.first.second, src_edge->id);
 
-        for(size_t i = 0; i < e.second->values.size(); i++)
+        for(size_t i = 0; i < src_edge->values.size(); i++)
         {
-            edge->values[i] = e.second->values[i];
+          edge->values[i] = src_edge->values[i];
         }
+        edge->control_point = src_edge->control_point;
+      }
     }
 
     // Copy inputs
@@ -311,7 +342,10 @@ void Network::to_json(json& j) const
     j["Edges"] = json::array();
     for(auto& e : m_edges)
     {
-        j["Edges"].push_back(e.second.get()->as_json());
+      for(auto& edge : e.second)
+      {
+        j["Edges"].push_back(edge.get()->as_json());
+      }
     }
 
     // Inputs & Outputs
@@ -380,18 +414,19 @@ void Network::from_json(const json &j)
     // Add edges /w values
     for(auto& je : j["Edges"])
     {
-        Parameter_Check_Json_T(je, edge_specs);
-        e = add_edge(je["from"], je["to"]);
-        e->values = je["values"].get<vector<double>>();
-        if (e->values.size() != m_properties.edge_vec_size) {
-          estring = "Error in the network JSON: Edge " + je["from"].dump() + "->" +
-                    je["to"].dump() + 
-                    "'s value array's size does not match the edge PropertyPack";
-          throw SRE(estring);
-        }
-        if (je.contains("control_point")) {
-          e->control_point = je["control_point"].get<vector<double>>();
-        }
+      Parameter_Check_Json_T(je, edge_specs);
+      uint64_t edge_id = je.contains("id") ? je["id"].get<uint64_t>() : next_edge_id(m_edges);
+      e = add_edge(je["from"], je["to"], edge_id);
+      e->values = je["values"].get<vector<double>>();
+      if (e->values.size() != m_properties.edge_vec_size) {
+        estring = "Error in the network JSON: Edge " + je["from"].dump() + "->" +
+                  je["to"].dump() + 
+                  "'s value array's size does not match the edge PropertyPack";
+        throw SRE(estring);
+      }
+      if (je.contains("control_point")) {
+        e->control_point = je["control_point"].get<vector<double>>();
+      }
     }
 
     // Set inputs & outputs
@@ -466,14 +501,19 @@ Node* Network::add_or_get_node(uint32_t idx)
 
 Edge* Network::add_edge(uint32_t fr, uint32_t to)
 {
+    return add_edge(fr, to, next_edge_id(m_edges));
+}
+
+Edge* Network::add_edge(uint32_t fr, uint32_t to, uint64_t id)
+{
     Node *from_node;
     Node *to_node;
     PropertyMap::iterator pit;
     int i;
     char buf[200];
 
-    if (is_edge(fr, to)) {
-      snprintf(buf, 200, "Edge %u -> %u already exists.", fr, to);
+    if(edge_id_exists(m_edges, id)) {
+      snprintf(buf, 200, "Edge id %llu already exists.", (unsigned long long) id);
       throw SRE(buf);
     }
 
@@ -487,37 +527,41 @@ Edge* Network::add_edge(uint32_t fr, uint32_t to)
       throw SRE(buf);
     }
 
-    EdgeMap::iterator eit;
-    bool inserted;
+    auto key = make_pair(fr, to);
+    auto &edge_vec = m_edges[key];
 
-    std::tie(eit, inserted) = m_edges.emplace(make_pair(fr, to), make_unique<Edge>(from_node, to_node, this));
+    edge_vec.push_back(make_unique<Edge>(from_node, to_node, this));
 
-    if(!inserted) {
-       snprintf(buf, 200, "Could not insert edge %u -> %u", fr, to);
-       throw SRE(buf);
-    }
+    Edge *new_edge = edge_vec.back().get();
+    new_edge->id = id;
 
-    // set the values to their max in the property_pack
-
-    eit->second->values.resize(m_properties.edge_vec_size);
+    new_edge->values.resize(m_properties.edge_vec_size);
     for (pit = m_properties.edges.begin(); pit != m_properties.edges.end(); pit++) {
       for (i = 0; i < pit->second.size; i++) {
-        eit->second->values[pit->second.index+i] = pit->second.max_value;
+        new_edge->values[pit->second.index+i] = pit->second.max_value;
       }
     }
 
-    from_node->outgoing.push_back(eit->second.get());
-    to_node->incoming.push_back(eit->second.get());
+    from_node->outgoing.push_back(new_edge);
+    to_node->incoming.push_back(new_edge);
 
-    return eit->second.get();
+    return new_edge;
 }
 
 Edge* Network::add_or_get_edge(uint32_t fr, uint32_t to)
 {
     if(is_edge(fr, to)) 
-        return get_edge(fr, to);
+        return m_edges.at(make_pair(fr, to)).front().get();
     else 
         return add_edge(fr, to);
+}
+
+Edge* Network::add_or_get_edge(uint32_t fr, uint32_t to, uint64_t id)
+{
+    if(is_edge(fr, to, id))
+        return get_edge(fr, to, id);
+    else
+        return add_edge(fr, to, id);
 }
    
 void Network::rename_node(uint32_t old_name, uint32_t new_name)
@@ -555,20 +599,22 @@ void Network::rename_node(uint32_t old_name, uint32_t new_name)
     m_nodes.erase(old_name);
     n->id = new_name;
    
-    // Move edges
+    // Move edge buckets. Use a set so parallel edges and self-loops only move once.
+    std::set<Coords> edge_names;
     for(auto &e : n->incoming)
-    {   
+        edge_names.insert(make_pair(e->from->id == new_name ? old_name : e->from->id, old_name));
+    for(auto &e : n->outgoing)
+        edge_names.insert(make_pair(old_name, e->to->id == new_name ? old_name : e->to->id));
 
-        auto fr_idx = e->from->id;
-        auto new_edge_name = make_pair(fr_idx, new_name);
+    for(auto &old_edge_name : edge_names)
+    {
+        auto new_edge_name = make_pair(old_edge_name.first == int(old_name) ? int(new_name) : old_edge_name.first,
+                                       old_edge_name.second == int(old_name) ? int(new_name) : old_edge_name.second);
+        auto &dst = m_edges[new_edge_name];
+        auto &src = m_edges.at(old_edge_name);
 
-        if (fr_idx == new_name) fr_idx = old_name; // self-loop case
-        auto old_edge_name = make_pair(fr_idx, old_name);
-         
-        m_edges.emplace(new_edge_name, std::move(m_edges.at(old_edge_name)));
+        std::move(src.begin(), src.end(), std::back_inserter(dst));
         m_edges.erase(old_edge_name);
-         
-       
     }
 
     for(auto &e : n->outgoing)
@@ -599,16 +645,35 @@ bool Network::is_edge(uint32_t fr, uint32_t to) const
     return (m_edges.find(make_pair(fr, to)) != m_edges.end());
 }
 
+bool Network::is_edge(uint32_t fr, uint32_t to, uint64_t id) const
+{
+    auto e = m_edges.find(make_pair(fr, to));
+    if(e == m_edges.end()) return false;
+
+    for(auto &edge : e->second)
+        if(edge->id == id) return true;
+    return false;
+}
+
+
 Node* Network::get_node(uint32_t idx) const
 {
     char buf[100];
     auto n = m_nodes.find(idx);
 
     if (n == m_nodes.end()) {
-      snprintf(buf, 100, "Node %u does not exist.", idx);
-      throw SRE((string) buf);
-    }
+        std::cerr << "Node " << idx << " does not exist.\n";
+        std::cerr << "Valid node ids:\n";
 
+        for (const auto& [node_id, node] : m_nodes) {
+            std::cerr << "  " << node_id << "\n";
+        }
+
+        std::cerr << std::flush;
+
+        snprintf(buf, 100, "Node %u does not exist.", idx);
+        throw SRE(buf);
+    }
     return n->second.get();
 }
 
@@ -622,7 +687,22 @@ Edge* Network::get_edge(uint32_t fr, uint32_t to) const
       throw SRE((string) buf);
     }
 
-    return e->second.get();
+    return e->second.front().get();
+}
+
+Edge* Network::get_edge(uint32_t fr, uint32_t to, uint64_t id) const
+{
+    char buf[160];
+    auto e = m_edges.find(make_pair(fr, to));
+
+    if (e != m_edges.end()) {
+      for(auto &edge : e->second)
+        if(edge->id == id) return edge.get();
+    }
+
+    snprintf(buf, 160, "Edge %u -> %u with id %llu does not exist.",
+             fr, to, (unsigned long long) id);
+    throw SRE(buf);
 }
 
 void Network::remove_node(uint32_t idx, bool force)
@@ -642,25 +722,52 @@ void Network::remove_node(uint32_t idx, bool force)
     // Any node addition or deletion invalidates the sorted_node_vector.
     sorted_node_vector.clear();
    
-    // Remove all synapses to/from this node
-    // Note: we just need to remove references to these edges & then remove from the hash table
-    // This node's incoming/outgoing vector can be deallocated all together rather than per-edge
+    // Remove all synapses to/from this node.
+    // Remove each adjacent bucket once so parallel edges do not leave dangling pointers.
+    std::set<Coords> edge_names;
     for(auto e : n->incoming)
     {
         Node *from_node = e->from;
-        auto f_edge = std::find(from_node->outgoing.begin(), from_node->outgoing.end(), e);
-        std::iter_swap(f_edge, from_node->outgoing.end() - 1);
-        from_node->outgoing.pop_back();
-        m_edges.erase(make_pair(from_node->id, idx));
+        edge_names.insert(make_pair(from_node->id, idx));
     }
 
     for(auto e : n->outgoing)
     {
         Node *to_node = e->to;
-        auto t_edge = std::find(to_node->incoming.begin(), to_node->incoming.end(), e);
-        std::iter_swap(t_edge, to_node->incoming.end() - 1);
-        to_node->incoming.pop_back();
-        m_edges.erase(make_pair(idx, to_node->id));
+        edge_names.insert(make_pair(idx, to_node->id));
+    }
+
+    for(auto edge_name : edge_names)
+    {
+        auto edge_bucket = m_edges.find(edge_name);
+        if(edge_bucket == m_edges.end()) continue;
+
+        for(auto &edge : edge_bucket->second)
+        {
+            if(edge->from->id != idx)
+            {
+                Node *from_node = edge->from;
+                auto f_edge = std::find(from_node->outgoing.begin(), from_node->outgoing.end(), edge.get());
+                if(f_edge != from_node->outgoing.end())
+                {
+                    std::iter_swap(f_edge, from_node->outgoing.end() - 1);
+                    from_node->outgoing.pop_back();
+                }
+            }
+
+            if(edge->to->id != idx)
+            {
+                Node *to_node = edge->to;
+                auto t_edge = std::find(to_node->incoming.begin(), to_node->incoming.end(), edge.get());
+                if(t_edge != to_node->incoming.end())
+                {
+                    std::iter_swap(t_edge, to_node->incoming.end() - 1);
+                    to_node->incoming.pop_back();
+                }
+            }
+        }
+
+        m_edges.erase(edge_bucket);
     }
 
     if(n->input_id >= 0)
@@ -692,8 +799,57 @@ void Network::remove_edge(uint32_t fr, uint32_t to)
     std::iter_swap(t_edge, to_node->incoming.end() - 1);
     to_node->incoming.pop_back();
 
-    // removal from hash table must be the last operation
-    m_edges.erase(make_pair(fr, to));
+    auto key = make_pair(fr, to);
+    auto edge_bucket = m_edges.find(key);
+    if(edge_bucket == m_edges.end()) return;
+    auto &bucket = edge_bucket.value();
+
+    vector<unique_ptr<Edge> > kept_edges;
+    kept_edges.reserve(bucket.size());
+    for(auto &edge : bucket)
+    {
+        if(edge.get() != e)
+            kept_edges.push_back(std::move(edge));
+    }
+
+    if(kept_edges.empty())
+        m_edges.erase(edge_bucket);
+    else
+        edge_bucket.value() = std::move(kept_edges);
+}
+
+void Network::remove_edge(uint32_t fr, uint32_t to, uint64_t id)
+{
+    Edge* e = get_edge(fr, to, id);
+    Node* from_node = get_node(fr);
+    Node* to_node = get_node(to);
+
+    auto f_edge = std::find(from_node->outgoing.begin(), from_node->outgoing.end(), e);
+    auto t_edge = std::find(to_node->incoming.begin(), to_node->incoming.end(), e);
+
+    std::iter_swap(f_edge, from_node->outgoing.end() - 1);
+    from_node->outgoing.pop_back();
+
+    std::iter_swap(t_edge, to_node->incoming.end() - 1);
+    to_node->incoming.pop_back();
+
+    auto key = make_pair(fr, to);
+    auto edge_bucket = m_edges.find(key);
+    if(edge_bucket == m_edges.end()) return;
+    auto &bucket = edge_bucket.value();
+
+    vector<unique_ptr<Edge> > kept_edges;
+    kept_edges.reserve(bucket.size());
+    for(auto &edge : bucket)
+    {
+        if(edge.get() != e)
+            kept_edges.push_back(std::move(edge));
+    }
+
+    if(kept_edges.empty())
+        m_edges.erase(edge_bucket);
+    else
+        edge_bucket.value() = std::move(kept_edges);
 }
 
 int Network::add_input(uint32_t idx)
@@ -792,7 +948,10 @@ size_t Network::num_nodes() const
 
 size_t Network::num_edges() const
 {
-    return m_edges.size();
+    size_t count = 0;
+    for(auto& e : m_edges)
+        count += e.second.size();
+    return count;
 }
 
 void Network::set_data(const string& name, const json& data)
@@ -833,8 +992,13 @@ Edge* Network::get_random_edge(MOA& moa) const
 {
     // TODO: Make this good
     auto it = m_edges.begin();
-    std::advance(it, moa.Random_Integer() % num_edges());
-    return it->second.get();
+    size_t edge_idx = moa.Random_Integer() % num_edges();
+    while(edge_idx >= it->second.size())
+    {
+        edge_idx -= it->second.size();
+        ++it;
+    }
+    return it->second[edge_idx].get();
 }
 
 Node* Network::get_random_input(MOA& moa) const
@@ -1123,8 +1287,8 @@ string Network::pretty_edges() const
   size_t i, j;
   string s;
   Node *n;
-  map <uint32_t, Edge *> m;
-  map <uint32_t, Edge *>::iterator mit;
+  map <uint32_t, vector<Edge *> > m;
+  map <uint32_t, vector<Edge *> >::iterator mit;
   
   if (num_edges() == 0) return "[]";
 
@@ -1147,11 +1311,13 @@ string Network::pretty_edges() const
       n = sorted_node_vector[i];
       m.clear();
       for (j = 0; j < n->outgoing.size(); j++) {
-        m[n->outgoing[j]->to->id] = n->outgoing[j];
+        m[n->outgoing[j]->to->id].push_back(n->outgoing[j]);
       }
       for (mit = m.begin(); mit != m.end(); mit++) {
-        s += ((s.size() == 0) ? "[ " : ",\n  ");
-        s += mit->second->as_json().dump();
+        for(Edge *edge : mit->second) {
+          s += ((s.size() == 0) ? "[ " : ",\n  ");
+          s += edge->as_json().dump();
+        }
       }
     }
     s += " ]";

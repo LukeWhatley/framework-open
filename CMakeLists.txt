@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(neuro)
+project(neuro LANGUAGES CXX)
 
 execute_process(
     COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
@@ -8,16 +8,6 @@ execute_process(
 )
 
 find_package(pybind11 REQUIRED CONFIG)
-find_package(Python3)
-
-execute_process(
-    COMMAND python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-    OUTPUT_VARIABLE PYTHON_VERSION
-	OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-message(STATUS "Detected Python version: ${PYTHON_VERSION}")
-
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/../pyframework/lib/python${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}/site-packages)
 
 set(SOURCES_NEURO bindings/framework.cpp
                   bindings/processor_help.cpp
@@ -48,3 +38,6 @@ set(SOURCES_RISP bindings/risp.cpp
 pybind11_add_module(risp ${SOURCES_RISP})
 
 target_include_directories(risp PRIVATE ./include ./bindings)
+
+install(TARGETS neuro risp LIBRARY DESTINATION .)
+

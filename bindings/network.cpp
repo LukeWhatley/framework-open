@@ -113,6 +113,7 @@ void bind_framework_network(py::module &m)
 		.def_readonly("pre", &Edge::from)
         .def_readonly("post", &Edge::to)
 		.def_readonly("net", &Edge::net)
+		.def_readonly("id", &Edge::id)
 		.def_readonly("values", &Edge::values)
 		.def("as_json", &Edge::as_json)
 		.def_readwrite("control_point", &Edge::control_point)
@@ -159,11 +160,16 @@ void bind_framework_network(py::module &m)
 		.def("add_or_get_node", &Network::add_or_get_node)
 		.def("remove_node", &Network::remove_node)
 		.def("rename_node", &Network::rename_node)
-		.def("add_edge", &Network::add_edge, py::return_value_policy::reference)
-		.def("is_edge", &Network::is_edge)
-		.def("get_edge", &Network::get_edge, py::return_value_policy::reference)
-		.def("add_or_get_edge", &Network::add_or_get_edge, py::return_value_policy::reference)
-		.def("remove_edge", &Network::remove_edge)
+		.def("add_edge", (Edge* (Network::*)(uint32_t, uint32_t)) &Network::add_edge, py::arg("pre"), py::arg("post"), py::return_value_policy::reference)
+		.def("add_edge", (Edge* (Network::*)(uint32_t, uint32_t, uint64_t)) &Network::add_edge, py::arg("pre"), py::arg("post"), py::arg("id"), py::return_value_policy::reference)
+        .def("is_edge", (bool (Network::*)(uint32_t, uint32_t) const) &Network::is_edge, py::arg("pre"), py::arg("post"))
+        .def("is_edge", (bool (Network::*)(uint32_t, uint32_t, uint64_t) const) &Network::is_edge, py::arg("pre"), py::arg("post"), py::arg("id"))
+        .def("get_edge", (Edge* (Network::*)(uint32_t, uint32_t) const) &Network::get_edge, py::arg("pre"), py::arg("post"), py::return_value_policy::reference)
+        .def("get_edge", (Edge* (Network::*)(uint32_t, uint32_t, uint64_t) const) &Network::get_edge, py::arg("pre"), py::arg("post"), py::arg("id"), py::return_value_policy::reference)
+        .def("add_or_get_edge", (Edge* (Network::*)(uint32_t, uint32_t)) &Network::add_or_get_edge, py::arg("pre"), py::arg("post"), py::return_value_policy::reference)
+        .def("add_or_get_edge", (Edge* (Network::*)(uint32_t, uint32_t, uint64_t)) &Network::add_or_get_edge, py::arg("pre"), py::arg("post"), py::arg("id"), py::return_value_policy::reference)
+        .def("remove_edge", (void (Network::*)(uint32_t, uint32_t)) &Network::remove_edge, py::arg("pre"), py::arg("post"))
+        .def("remove_edge", (void (Network::*)(uint32_t, uint32_t, uint64_t)) &Network::remove_edge, py::arg("pre"), py::arg("post"), py::arg("id"))
 
 		.def("add_input", &Network::add_input)
 		.def("get_input", &Network::get_input, py::return_value_policy::reference)
@@ -204,12 +210,17 @@ void bind_framework_network(py::module &m)
 		.def("get_edge_map", [](Network &self) {
 				py::dict dict;
 				for (auto it = self.edges_begin(); it != self.edges_end(); it++) {
-					std::tuple<uint32_t, uint32_t> coords = {it->second.get()->from->id, it->second.get()->to->id};
-					dict[py::cast(coords)] = py::cast(it->second.get());
+					for (auto &edge_ptr : it->second) {
+						std::tuple<uint32_t, uint32_t, uint64_t> coords = {
+							edge_ptr->from->id,
+							edge_ptr->to->id,
+							edge_ptr->id
+						};
+						dict[py::cast(coords)] = py::cast(edge_ptr.get());
+					}
 				}
 				return dict;
-			}, py::return_value_policy::reference)
-		.def("num_nodes", &Network::num_nodes)
+			}, py::return_value_policy::reference)		.def("num_nodes", &Network::num_nodes)
 		.def("num_edges", &Network::num_edges)
 
 		.def("__getitem__", [](const Network &net, int key) {

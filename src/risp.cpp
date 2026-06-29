@@ -114,8 +114,10 @@ Network::Network(neuro::Network *net,
 
   /* Add synpases */
   for (eit = net->edges_begin(); eit != net->edges_end(); ++eit) {
-    edge = eit->second.get();
-    add_synpase(edge->from->id, edge->to->id, edge->get("Weight"), edge->get("Delay"));
+    for(auto &edge_ptr : eit->second) {
+      edge = edge_ptr.get();
+      add_synpase(edge->from->id, edge->to->id, edge->get("Weight"), edge->get("Delay"));
+    }
   }
 }
 
