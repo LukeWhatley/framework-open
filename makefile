@@ -31,6 +31,9 @@ VRISP_RVV_FULL_OBJ = obj/vrisp_rvv_full.o obj/vrisp_static.o
 VRISP_RVV_FIRED_OBJ = obj/vrisp_rvv_fired.o obj/vrisp_static.o
 VRISP_RVV_SYNAPSES_OBJ = obj/vrisp_rvv_synapses.o obj/vrisp_static.o
 
+DRISP_INC = include/drisp.hpp
+DRISP_OBJ = obj/drisp.o obj/drisp_static.o
+
 all: lib/libframework.a \
      bin/network_tool \
      bin/compose_networks \
@@ -84,6 +87,9 @@ bin/processor_tool_vrisp_vector_fired: src/processor_tool.cpp $(FR_INC) $(VRISP_
 bin/processor_tool_vrisp_vector_synapses: src/processor_tool.cpp $(FR_INC) $(VRISP_INC) $(VRISP_RVV_SYNAPSES_OBJ) $(FR_LIB)
 	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_vrisp_vector_synapses src/processor_tool.cpp $(VRISP_RVV_SYNAPSES_OBJ) $(FR_LIB)
 
+bin/processor_tool_drisp: src/processor_tool.cpp $(FR_INC) $(DRISP_INC) $(DRISP_OBJ) $(FR_LIB)
+	$(CXX) $(FR_CFLAGS) -o bin/processor_tool_drisp src/processor_tool.cpp $(DRISP_OBJ) $(FR_LIB)
+
 # ------------------------------------------------------------
 # Auxiliary Programs
 
@@ -122,6 +128,12 @@ obj/vrisp_rvv_synapses.o: src/vrisp.cpp $(FR_INC) $(VRISP_INC)
 
 obj/vrisp_static.o: src/vrisp_static.cpp $(FR_INC) $(VRISP_INC)
 	$(CXX) -c $(FR_CFLAGS) -o obj/vrisp_static.o src/vrisp_static.cpp
+
+obj/drisp.o: src/drisp.cpp $(FR_INC) $(DRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -o obj/drisp.o src/drisp.cpp
+
+obj/drisp_static.o: src/drisp_static.cpp $(FR_INC) $(DRISP_INC)
+	$(CXX) -c $(FR_CFLAGS) -o obj/drisp_static.o src/drisp_static.cpp
 
 obj/framework.o: src/framework.cpp $(FR_INC)
 	$(CXX) -c $(FR_CFLAGS) -o obj/framework.o src/framework.cpp

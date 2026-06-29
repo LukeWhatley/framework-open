@@ -41,9 +41,18 @@ pybind11_add_module(risp ${SOURCES_RISP})
 
 target_link_libraries(risp PRIVATE framework)
 
+set(SOURCES_DRISP bindings/drisp.cpp
+                 bindings/pybind_json.hpp
+                 src/drisp.cpp
+                 src/drisp_static.cpp)
+
+pybind11_add_module(drisp ${SOURCES_DRISP})
+
+target_link_libraries(drisp PRIVATE framework)
+
 FetchContent_Declare(eons
     SOURCE_DIR /home/null/Documents/Research/eons
 )
 FetchContent_MakeAvailable(eons)
 
-install(TARGETS neuro risp LIBRARY DESTINATION .)
+install(TARGETS neuro risp drisp LIBRARY DESTINATION .)
