@@ -81,6 +81,10 @@ public:
           uint32_t _noisy_seed,
           double _noisy_stddev,
           uint32_t _num_dendrites,
+          double _min_dendritic_coupling,
+          double _max_dendritic_coupling,
+          double _min_dendritic_threshold,
+          double _max_dendritic_threshold,
           vector <double> & _weights, 
           vector <double> & _stds);  
   ~Network();
@@ -162,6 +166,10 @@ protected:
   vector <double> stds;
 
   uint32_t num_dendrites;
+  double min_dendritic_coupling;
+  double max_dendritic_coupling;
+  double min_dendritic_threshold;
+  double max_dendritic_threshold;
 
   double spike_value_factor;
   vector <Neuron *> to_fire;   /* To make DRISP like RAVENS, this lets you fire a timestep later. */
@@ -267,6 +275,10 @@ protected:
   uint32_t max_delay;
 
   uint32_t num_dendrites;
+  double min_dendritic_coupling;
+  double max_dendritic_coupling;
+  double min_dendritic_threshold;
+  double max_dendritic_threshold;
 
   json saved_params;
 };

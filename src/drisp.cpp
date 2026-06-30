@@ -20,6 +20,10 @@ static json drisp_spec = {
   { "max_threshold", "D" },
   { "min_potential", "D" },
   { "num_dendrites", "I" },
+  { "min_dendritic_coupling", "D" },
+  { "max_dendritic_coupling", "D" },
+  { "min_dendritic_threshold", "D" },
+  { "max_dendritic_threshold", "D" },
   { "noisy_stddev", "D" },
   { "spike_value_factor", "D" },
   { "leak_mode", "S" },            /* "all", "none", "configurable" */
@@ -36,6 +40,10 @@ static json drisp_spec = {
                      "min_threshold",
                      "max_threshold",
                      "min_potential",
+                     "min_dendritic_coupling",
+                     "max_dendritic_coupling",
+                     "min_dendritic_threshold",
+                     "max_dendritic_threshold",
                      "discrete",
                      "num_dendrites" } } };
 
@@ -136,6 +144,10 @@ Network::Network(neuro::Network *net,
                  uint32_t _noisy_seed,
                  double _noisy_stddev,
                  uint32_t _num_dendrites,
+                 double _min_dendritic_coupling,
+                 double _max_dendritic_coupling,
+                 double _min_dendritic_threshold,
+                 double _max_dendritic_threshold,
                  vector <double> & _weights, 
                  vector < double> & _stds) 
 {
@@ -167,6 +179,10 @@ Network::Network(neuro::Network *net,
   rng.Seed(noisy_seed, "noisy_drisp");
 
   num_dendrites = _num_dendrites;
+  min_dendritic_coupling = _min_dendritic_coupling;
+  max_dendritic_coupling = _max_dendritic_coupling;
+  min_dendritic_threshold = _min_dendritic_threshold;
+  max_dendritic_threshold = _max_dendritic_threshold;
 
   /* Add neurons */
   net->make_sorted_node_vector();
@@ -550,7 +566,8 @@ void Network::clear_activity()
     n->charge = 0;
     n->last_check = -1;
 
-
+    // clear dendritic charges
+    fill(n->dendritic_charges.begin(), n->dendritic_charges.end(), 0.0);
   }
 
   events.clear();
@@ -803,18 +820,18 @@ void Network::process_events(uint32_t time)
     if (n->dendritic_charges[es[i].b] >= n->dendritic_thresholds[es[i].b]) {
 
       // LW: Use a more graded approach for dendritic coupling
-      double excess = n->dendritic_charges[es[i].b] - n->dendritic_thresholds[es[i].b];
+      // double excess = n->dendritic_charges[es[i].b] - n->dendritic_thresholds[es[i].b];
 
-      if (excess >= 0) {
-          n->charge += n->dendritic_couplings[es[i].b] * excess;
-          n->dendritic_charges[es[i].b] = 0;
-      }
+      // if (excess >= 0) {
+      n->charge += n->dendritic_couplings[es[i].b]; // * excess;
+      n->dendritic_charges[es[i].b] = 0;
+      // }
 
       /* fire and contribute to soma charge */
       // n->charge += n->dendritic_couplings[es[i].b];
 
       /* reset dendritic charge if fired */
-      n->dendritic_charges[es[i].b] = 0;
+      // n->dendritic_charges[es[i].b] = 0;
     }
   }
 
@@ -964,6 +981,10 @@ Processor::Processor(json &params) {
   min_potential = params["min_potential"];
   discrete = params["discrete"];
   num_dendrites = params["num_dendrites"];
+  min_dendritic_coupling = params["min_dendritic_coupling"];
+  max_dendritic_coupling = params["max_dendritic_coupling"];
+  min_dendritic_threshold = params["min_dendritic_threshold"];
+  max_dendritic_threshold = params["max_dendritic_threshold"];
 
   /* Handle weights + min_weights + max_weights + inputs_from_weight. */
 
@@ -1102,6 +1123,10 @@ Processor::Processor(json &params) {
   saved_params["min_potential"] = min_potential;
   saved_params["discrete"] = discrete;
   saved_params["num_dendrites"] = num_dendrites;
+  saved_params["min_dendritic_coupling"] = min_dendritic_coupling;
+  saved_params["max_dendritic_coupling"] = max_dendritic_coupling;
+  saved_params["min_dendritic_threshold"] = min_dendritic_threshold;
+  saved_params["max_dendritic_threshold"] = max_dendritic_threshold;
 
   saved_params["leak_mode"] = leak_mode;
   saved_params["fire_like_ravens"] = fire_like_ravens;
@@ -1165,6 +1190,10 @@ bool Processor::load_network(neuro::Network* net, int network_id) {
                                noisy_seed, 
                                noisy_stddev,
                                num_dendrites,
+                               min_dendritic_coupling,
+                               max_dendritic_coupling,
+                               min_dendritic_threshold,
+                               max_dendritic_threshold,
                                weights,
                                stds);
   networks[network_id] = drisp_net;
@@ -1367,9 +1396,9 @@ PropertyPack Processor::get_network_properties() const {
 
   // Add coupling and threshold properties for each dendrite
   for(uint32_t i = 0; i < num_dendrites; i++) {
-    pp.add_node_property("D_Coupling_" + to_string(i), min_weight, max_weight, 
+    pp.add_node_property("D_Coupling_" + to_string(i), min_dendritic_coupling, max_dendritic_coupling, 
                         (discrete) ? Property::Type::INTEGER : Property::Type::DOUBLE);
-    pp.add_node_property("D_Threshold_" + to_string(i), min_threshold, max_threshold, 
+    pp.add_node_property("D_Threshold_" + to_string(i), min_dendritic_threshold, max_dendritic_threshold, 
                         (discrete) ? Property::Type::INTEGER : Property::Type::DOUBLE);
   }
 
